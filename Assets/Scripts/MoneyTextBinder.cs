@@ -17,6 +17,6 @@ public class MoneyTextBinder : MonoBehaviour
     }
     void UpdateText(int value)
     {
-        if (text) text.SetText($"$ {value}");
+        if (text) text.SetText($" {value}");
     }
 }

@@ -134,6 +134,8 @@ public class ProcessingStation : MonoBehaviour
     private readonly List<StackItem> _inputItems = new();
     private readonly List<GameObject> _outputItems = new();
     private bool _isProcessing;
+    private bool _transferBusy; // guard: не запускать второй перенос, пока первый не кончилс€
+
 
     void Reset()
     {
@@ -142,50 +144,59 @@ public class ProcessingStation : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-    
-        if (other.GetComponentInParent<PlayerCollector>() != null)
-        {
-            StartCoroutine(TransferFromBackpack());
-            return;
-        }
+        if (_transferBusy) return;
 
-      
-        var bp = other.GetComponentInParent<BackpackStack>();
-        if (bp != null && bp == playerBackpack)
+        if (other.GetComponentInParent<PlayerCollector>() != null
+            || other.GetComponentInParent<BackpackStack>() == playerBackpack)
         {
             StartCoroutine(TransferFromBackpack());
         }
     }
+
 
 
     private IEnumerator TransferFromBackpack()
     {
         if (!playerBackpack || inputPlatform.root == null) yield break;
+        _transferBusy = true;
 
-        // переносим LIFO: пока есть место на входе и есть предметы у игрока Ч забираем по одному с верха стека
+        // ѕока есть место на входе и есть предметы у игрока Ч переносим по одному
         while (_inputItems.Count < inputPlatform.Capacity && playerBackpack.Count > 0)
         {
-            var item = playerBackpack.PopTop(); // <-- LIFO
+            var item = playerBackpack.PopTop();   // последний собранный
             if (!item) break;
 
-            // плавно перемещаем под корень входа (короткий прыжок), Ѕ≈« scale-out из рюкзака
             item.scaleCurve = scaleCurve;
-            yield return item.MoveToParent(inputPlatform.root, 0.18f, 0.15f, true);
 
-            // ставим точно в €чейку сетки по текущему индексу
-            PositionOnGrid(item.transform, inputPlatform, _inputItems.Count);
+            // --- ƒ≈ јѕЋ»Ќ√ ќ“ я ќ–я ---
+            // —охраним мировую позу и временно отцепим от €кор€, чтобы движение игрока
+            // не вли€ло на позицию во врем€ scale-out
+            var t = item.transform;
+            var worldPos = t.position;
+            var worldRot = t.rotation;
+            t.SetParent(null, true);
+            t.position = worldPos;
+            t.rotation = worldRot;
 
-            // доводим масштаб до 1, если нужно
-            if (item.transform.localScale != Vector3.one)
-                yield return item.ScaleRoutine(item.transform.localScale, Vector3.one, scaleDuration * 0.6f);
+            // 1) Ќа месте (в мире) скейлим 1 -> 0
+            yield return item.ScaleRoutine(t.localScale, Vector3.zero, scaleDuration);
+
+            // 2) ѕереприв€зываем к входу и ставим в €чейку сетки со scale=0
+            t.SetParent(inputPlatform.root, false);
+            PositionOnGrid(t, inputPlatform, _inputItems.Count);
+            t.localScale = Vector3.zero;
+
+            // 3) ѕо€вление 0 -> 1 уже в целевой €чейке
+            yield return item.ScaleRoutine(Vector3.zero, Vector3.one, scaleDuration);
 
             _inputItems.Add(item);
             onInputCountChanged?.Invoke(_inputItems.Count);
         }
 
-        if (autoStartProcessing)
-            TryStartProcessing();
+        if (autoStartProcessing) TryStartProcessing();
+        _transferBusy = false;
     }
+
 
 
     private void TryStartProcessing()
