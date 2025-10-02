@@ -37,6 +37,8 @@ public class ProcessingStation : MonoBehaviour
         public Color gizmoColor = new Color(0, 1, 1, 0.9f);
         [Tooltip("Max cells to preview with gizmos for performance.")]
         public int gizmoMaxCells = 200;
+        
+
 
         public int Capacity
         {
@@ -99,7 +101,7 @@ public class ProcessingStation : MonoBehaviour
     [Header("Refs")]
     public BackpackStack playerBackpack;
     [Tooltip("Trigger that detects player arrival to start transfer.")]
-    public Collider stationTrigger;
+    
 
     [Header("Platforms (Grid)")]
     public GridPlatform inputPlatform;
@@ -127,7 +129,7 @@ public class ProcessingStation : MonoBehaviour
     // Count-change events for simple UI binders
     public UnityEvent<int> onInputCountChanged;
     public UnityEvent<int> onOutputCountChanged;
-
+    public bool autoStartProcessing = true;
     // runtime
     private readonly List<StackItem> _inputItems = new();
     private readonly List<GameObject> _outputItems = new();
@@ -138,47 +140,55 @@ public class ProcessingStation : MonoBehaviour
         if (TryGetComponent(out Collider col)) col.isTrigger = true;
     }
 
-    void OnTriggerEnter(Collider other)
+    private void OnTriggerEnter(Collider other)
     {
-        if (!stationTrigger || other != stationTrigger) return;
-        StartCoroutine(TransferFromBackpack());
+    
+        if (other.GetComponentInParent<PlayerCollector>() != null)
+        {
+            StartCoroutine(TransferFromBackpack());
+            return;
+        }
+
+      
+        var bp = other.GetComponentInParent<BackpackStack>();
+        if (bp != null && bp == playerBackpack)
+        {
+            StartCoroutine(TransferFromBackpack());
+        }
     }
 
-    IEnumerator TransferFromBackpack()
+
+    private IEnumerator TransferFromBackpack()
     {
         if (!playerBackpack || inputPlatform.root == null) yield break;
 
-        int free = Mathf.Max(0, inputPlatform.Capacity - _inputItems.Count);
-        if (free <= 0) yield break;
-
-        int canTake = Mathf.Min(free, playerBackpack.Count);
-        if (canTake <= 0) yield break;
-
-        var taken = playerBackpack.PopMany(canTake);
-
-        foreach (var item in taken)
+        // переносим LIFO: пока есть место на входе и есть предметы у игрока Ч забираем по одному с верха стека
+        while (_inputItems.Count < inputPlatform.Capacity && playerBackpack.Count > 0)
         {
-            if (!item) continue;
+            var item = playerBackpack.PopTop(); // <-- LIFO
+            if (!item) break;
 
-            // scale-out in backpack, then place into input grid cell, scale-in to 1
+            // плавно перемещаем под корень входа (короткий прыжок), Ѕ≈« scale-out из рюкзака
             item.scaleCurve = scaleCurve;
-            yield return item.ScaleRoutine(item.transform.localScale, Vector3.zero, scaleDuration);
+            yield return item.MoveToParent(inputPlatform.root, 0.18f, 0.15f, true);
 
-            // parent under input root and position by grid index
-            item.transform.SetParent(inputPlatform.root, false);
+            // ставим точно в €чейку сетки по текущему индексу
             PositionOnGrid(item.transform, inputPlatform, _inputItems.Count);
 
-            item.transform.localScale = Vector3.zero;
-            yield return item.ScaleRoutine(Vector3.zero, Vector3.one, scaleDuration);
+            // доводим масштаб до 1, если нужно
+            if (item.transform.localScale != Vector3.one)
+                yield return item.ScaleRoutine(item.transform.localScale, Vector3.one, scaleDuration * 0.6f);
 
             _inputItems.Add(item);
             onInputCountChanged?.Invoke(_inputItems.Count);
         }
 
-        TryStartProcessing();
+        if (autoStartProcessing)
+            TryStartProcessing();
     }
 
-    void TryStartProcessing()
+
+    private void TryStartProcessing()
     {
         if (_isProcessing) return;
         if (_inputItems.Count >= batchSize)
