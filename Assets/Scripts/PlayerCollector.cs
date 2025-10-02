@@ -32,32 +32,59 @@ public class PlayerCollector : MonoBehaviour
     {
         if (!backpack) return;
 
-        // current available considering reservations
-        int freeSlots = Mathf.Max(0, backpack.capacity - (backpack.Count + _reservedSlots));
-        if (freeSlots <= 0) return;
-
-        var item = other.GetComponent<StackItem>();
-        if (!item) item = other.GetComponentInParent<StackItem>();
+        var item = other.GetComponent<StackItem>() ?? other.GetComponentInParent<StackItem>();
         if (!item) return;
 
-        // already carried?
+        // пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ? пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         if (item.transform.IsChildOf(backpack.anchor)) return;
-
-        // already reserved by us?
         if (_reservedItems.Contains(item)) return;
+
+        // пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ?
+        if (!backpack.HasFreeSlot) return;
 
         _timer += Time.deltaTime;
         if (_timer < pickupInterval) return;
         _timer = 0f;
 
-        // reserve slot and lock item immediately
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
+        int reservedIndex = backpack.ReserveSlot();
+        if (reservedIndex < 0) return;
+
         _reservedItems.Add(item);
-        _reservedSlots++;
-
-        // disable colliders right away so физика/другие триггеры не схватили ещё раз
+        // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
         foreach (var c in item.GetComponentsInChildren<Collider>()) c.enabled = false;
+        DisablePhysicsForPickup(item);
 
-        StartCoroutine(PickOne(item));
+        StartCoroutine(PickOne(item, reservedIndex));
+    }
+
+    private IEnumerator PickOne(StackItem item, int reservedIndex)
+    {
+        if (!item || !backpack)
+        {
+            if (backpack != null) backpack.CancelReserve();
+            _reservedItems.Remove(item);
+            if (item) foreach (var c in item.GetComponentsInChildren<Collider>()) c.enabled = true;
+            yield break;
+        }
+
+        // 1) scale-out пїЅ пїЅпїЅпїЅпїЅ
+        yield return item.ScaleRoutine(item.transform.localScale, Vector3.zero, pileScaleOutDuration);
+
+        // 2) пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+        item.transform.SetParent(backpack.anchor, false);
+        item.transform.localRotation = Quaternion.identity;
+        item.transform.localPosition = backpack.LocalPosForIndex(reservedIndex);
+        item.transform.localScale = Vector3.zero;
+
+        // 3) scale-in пїЅпїЅ carriedScale
+        item.scaleCurve = backpack.scaleCurve;
+        yield return item.ScaleRoutine(Vector3.zero, backpack.carriedScale, backpack.scaleDuration);
+
+        // 4) пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
+        backpack.AddReserved(item);
+
+        _reservedItems.Remove(item);
     }
 
     private IEnumerator PickOne(StackItem item)
@@ -90,4 +117,28 @@ public class PlayerCollector : MonoBehaviour
             foreach (var c in item.GetComponentsInChildren<Collider>()) c.enabled = true;
         }
     }
+    private void DisablePhysicsForPickup(StackItem item)
+    {
+        foreach (var rb in item.GetComponentsInChildren<Rigidbody>())
+        {
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.useGravity = false;
+            rb.isKinematic = true;
+        }
+        foreach (var c in item.GetComponentsInChildren<Collider>())
+            c.enabled = false;
+    }
+
+    private void RestorePhysicsIfCanceled(StackItem item)
+    {
+        foreach (var rb in item.GetComponentsInChildren<Rigidbody>())
+        {
+            rb.isKinematic = false;
+            rb.useGravity = true;
+        }
+        foreach (var c in item.GetComponentsInChildren<Collider>())
+            c.enabled = true;
+    }
+
 }

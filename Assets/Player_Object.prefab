@@ -200,7 +200,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   anchor: {fileID: 2678222552732094031}
   verticalSpacing: 0.27
-  capacity: 5
+  capacity: 15
   carriedScale: {x: 1, y: 1, z: 1}
   scaleDuration: 0.2
   scaleCurve:
@@ -240,7 +240,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   backpack: {fileID: 3665145103812156411}
-  pickupInterval: 0.08
+  pickupInterval: 5
   pileScaleOutDuration: 0.15
 --- !u!136 &2198488898630011206
 CapsuleCollider:

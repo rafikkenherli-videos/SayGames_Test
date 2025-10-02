@@ -29,6 +29,38 @@ public class BackpackStack : MonoBehaviour
 
     public int Count => _items.Count;
     public bool IsFull => _items.Count >= capacity;
+    // Внутри BackpackStack
+    private int _reservedSlots = 0;
+
+    // Есть ли свободное место с учётом уже зарезервированных, но ещё не добавленных?
+    public bool HasFreeSlot => (Count + _reservedSlots) < capacity;
+
+    // Забронировать слот. Возвращает зарезервированный индекс (0..), либо -1 если нет места.
+    public int ReserveSlot()
+    {
+        if (!HasFreeSlot) return -1;
+        _reservedSlots++;
+        // индекс, на который встанет предмет, пока он «в пути»
+        return Count + _reservedSlots - 1;
+    }
+
+    // Отменить бронь (если что-то пошло не так)
+    public void CancelReserve()
+    {
+        if (_reservedSlots > 0) _reservedSlots--;
+    }
+
+    // Подтвердить добавление уже поставленного предмета (снимает одну бронь)
+    public void AddReserved(StackItem item)
+    {
+        if (!item) return;
+        _items.Add(item);
+        if (_reservedSlots > 0) _reservedSlots--;
+        Relayout(); // финальная нормализация
+    }
+
+    // Удобство: посчитать локальную позицию по индексу
+    public Vector3 LocalPosForIndex(int index) => new Vector3(0f, verticalSpacing * index, 0f);
 
     private void OnValidate()
     {
@@ -110,6 +142,26 @@ public class BackpackStack : MonoBehaviour
             t.localScale = carriedScale;
         }
     }
+    // Возврат предметов на верх стопки в исходном порядке (0-й станет нижним из возвращаемых)
+    public void PushBackTop(List<StackItem> items)
+    {
+        if (items == null || items.Count == 0) return;
+        foreach (var it in items)
+        {
+            if (!it) continue;
+            // родительство и нормализация позы под якорь
+            it.transform.SetParent(anchor, false);
+            it.transform.localRotation = Quaternion.identity;
+            it.transform.localScale = carriedScale;
+            _items.Add(it);
+        }
+        // разложить по высоте заново
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var t = _items[i].transform;
+            t.localPosition = new Vector3(0f, verticalSpacing * i, 0f);
+        }
+    }
 
     /// <summary>
     /// Enable/disable physics for item when carried.
@@ -121,4 +173,15 @@ public class BackpackStack : MonoBehaviour
         foreach (var c in item.GetComponentsInChildren<Collider>())
             c.enabled = enable;
     }
+    // Returns the last collected item (top of the stack), or null if empty.
+    public StackItem PopTop()
+    {
+        if (_items.Count == 0) return null;
+        int last = _items.Count - 1;
+        var it = _items[last];
+        _items.RemoveAt(last);
+        Relayout(); // keep layout consistent after removal
+        return it;
+    }
+
 }
